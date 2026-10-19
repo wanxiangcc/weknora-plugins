@@ -1,0 +1,150 @@
+diff --git a/internal/application/service/datasource_service.go b/internal/application/service/datasource_service.go
+index b662a4ea..328f47a6 100644
+--- a/internal/application/service/datasource_service.go
++++ b/internal/application/service/datasource_service.go
+@@ -425,6 +425,73 @@ func (s *DataSourceService) ListAvailableResources(
+ 	return resources, nil
+ }
+ 
++// ResolveResourceFields lists one resource's selectable children, passing the
++// name hint through so connectors with expensive listings can look the resource
++// up directly instead of listing everything.
++func (s *DataSourceService) ResolveResourceFields(
++	ctx context.Context, dsID string, resourceID string, nameHint string,
++) ([]types.Resource, error) {
++	ds, err := s.GetDataSource(ctx, dsID)
++	if err != nil {
++		return nil, err
++	}
++	connector, err := s.connectorRegistry.Get(ds.Type)
++	if err != nil {
++		return nil, err
++	}
++	config, err := ds.ParseConfig()
++	if err != nil {
++		return nil, datasource.ErrInvalidConfig
++	}
++	if resolver, ok := connector.(datasource.ResourceFieldsResolver); ok {
++		return resolver.ResolveResourceFields(ctx, config, resourceID, nameHint)
++	}
++	return connector.ListResources(ctx, config, resourceID)
++}
++
++// SearchAvailableResources lists only the resources whose name matches keyword.
++//
++// Connectors with a very large listing implement datasource.ResourceSearcher and
++// filter server-side; the rest fall back to one listing filtered by name, so the
++// API is uniform across connectors and no connector had to change.
++func (s *DataSourceService) SearchAvailableResources(
++	ctx context.Context, dsID string, keyword string,
++) ([]types.Resource, error) {
++	keyword = strings.TrimSpace(keyword)
++	if keyword == "" {
++		// Never answer "everything": the caller asked to avoid that.
++		return []types.Resource{}, nil
++	}
++	ds, err := s.GetDataSource(ctx, dsID)
++	if err != nil {
++		return nil, err
++	}
++	connector, err := s.connectorRegistry.Get(ds.Type)
++	if err != nil {
++		return nil, err
++	}
++	config, err := ds.ParseConfig()
++	if err != nil {
++		return nil, datasource.ErrInvalidConfig
++	}
++	if searcher, ok := connector.(datasource.ResourceSearcher); ok {
++		return searcher.SearchResources(ctx, config, keyword)
++	}
++	all, err := connector.ListResources(ctx, config, "")
++	if err != nil {
++		logger.Errorf(ctx, "failed to list resources for search: %v", err)
++		return nil, err
++	}
++	needle := strings.ToLower(keyword)
++	match := make([]types.Resource, 0, 16)
++	for _, resource := range all {
++		if strings.Contains(strings.ToLower(resource.Name), needle) {
++			match = append(match, resource)
++		}
++	}
++	return match, nil
++}
++
+ // ResolveResourceAncestors resolves the ancestor ExternalIDs needed to reveal the
+ // given resources in a lazily-loaded picker (see the connector method for details).
+ func (s *DataSourceService) ResolveResourceAncestors(
+diff --git a/internal/handler/datasource.go b/internal/handler/datasource.go
+index 2f219d37..0ef86d33 100644
+--- a/internal/handler/datasource.go
++++ b/internal/handler/datasource.go
+@@ -4,6 +4,7 @@ import (
+ 	"context"
+ 	"net/http"
+ 	"strconv"
++	"strings"
+ 
+ 	"github.com/Tencent/WeKnora/internal/datasource"
+ 	"github.com/Tencent/WeKnora/internal/handler/dto"
+@@ -337,6 +338,8 @@ func (h *DataSourceHandler) ValidateCredentials(c *gin.Context) {
+ // @Produce json
+ // @Param id path string true "Data source ID"
+ // @Param parent_id query string false "Parent resource ExternalID; empty lists the top level"
++// @Param keyword query string false "Name filter. When set, only matching resources are returned (connectors with huge listings filter server-side)"
++// @Param name query string false "Name of the resource in parent_id. Lets a connector with an expensive listing locate that one resource instead of listing everything"
+ // @Success 200 {object} []types.Resource
+ // @Failure 400 {object} map[string]string
+ // @Router /datasource/{id}/resources [get]
+@@ -350,13 +353,27 @@ func (h *DataSourceHandler) ListAvailableResources(c *gin.Context) {
+ 
+ 	id := c.Param("id")
+ 	parentID := c.Query("parent_id")
++	keyword := c.Query("keyword")
+ 
+ 	if _, status, msg := h.getOwnedDataSource(ctx, tenantID, id); status != http.StatusOK {
+ 		c.JSON(status, gin.H{"error": msg})
+ 		return
+ 	}
+ 
+-	resources, err := h.service.ListAvailableResources(ctx, id, parentID)
++	// Three modes, in this order:
++	//   parent_id + name → one resource's children, located by name (fast)
++	//   keyword          → search across names (fast for huge listings)
++	//   neither          → the whole top-level listing
++	var resources []types.Resource
++	var err error
++	switch {
++	case strings.TrimSpace(parentID) != "":
++		resources, err = h.service.ResolveResourceFields(ctx, id, parentID, c.Query("name"))
++	case strings.TrimSpace(keyword) != "":
++		resources, err = h.service.SearchAvailableResources(ctx, id, keyword)
++	default:
++		resources, err = h.service.ListAvailableResources(ctx, id, parentID)
++	}
+ 	if err != nil {
+ 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+ 		return
+diff --git a/internal/types/interfaces/datasource.go b/internal/types/interfaces/datasource.go
+index cdbb92a7..358d630f 100644
+--- a/internal/types/interfaces/datasource.go
++++ b/internal/types/interfaces/datasource.go
+@@ -47,6 +47,17 @@ type DataSourceService interface {
+ 	// parentID enables lazy loading: "" lists the top level, a resource ExternalID lists its children.
+ 	ListAvailableResources(ctx context.Context, dsID string, parentID string) ([]types.Resource, error)
+ 
++	// ResolveResourceFields lists one resource's selectable children, with the
++	// resource's name as a hint so connectors with expensive listings can avoid
++	// re-listing everything to find it.
++	ResolveResourceFields(ctx context.Context, dsID string, resourceID string, nameHint string) ([]types.Resource, error)
++
++	// SearchAvailableResources lists only the resources whose name matches
++	// keyword. Used by pickers over very large listings (Seeyon reports), where
++	// loading everything is both slow and useless. An empty keyword returns no
++	// resources.
++	SearchAvailableResources(ctx context.Context, dsID string, keyword string) ([]types.Resource, error)
++
+ 	// ResolveResourceAncestors returns the deduplicated ExternalIDs of every
+ 	// ancestor that must be expanded to reveal the given (possibly deeply nested)
+ 	// resources in a lazily-loaded picker. Used to restore an existing selection

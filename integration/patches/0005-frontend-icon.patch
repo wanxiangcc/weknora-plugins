@@ -1,0 +1,17 @@
+diff --git a/frontend/src/assets/img/datasource-seeyon.svg b/frontend/src/assets/img/datasource-seeyon.svg
+new file mode 100644
+index 00000000..b7d9babb
+--- /dev/null
++++ b/frontend/src/assets/img/datasource-seeyon.svg
+@@ -0,0 +1,11 @@
++<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="Seeyon">
++  <rect x="1" y="1" width="22" height="22" rx="5" fill="#C8102E"/>
++  <g fill="#FFFFFF">
++    <!-- Report table: a header band over three data rows, reading as "查询/统计报表". -->
++    <rect x="5" y="6" width="14" height="2.6" rx="1"/>
++    <rect x="5" y="10.4" width="6" height="2.2" rx="0.8"/>
++    <rect x="12.4" y="10.4" width="6.6" height="2.2" rx="0.8"/>
++    <rect x="5" y="14.4" width="6" height="2.2" rx="0.8"/>
++    <rect x="12.4" y="14.4" width="6.6" height="2.2" rx="0.8"/>
++  </g>
++</svg>

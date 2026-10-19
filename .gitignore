@@ -1,0 +1,23 @@
+# macOS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Go
+/bin/
+*.test
+*.out
+
+# Frontend (when the integration tree is used locally)
+node_modules/
+frontend/dist/
+
+# Local env / secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key

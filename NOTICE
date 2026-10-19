@@ -1,0 +1,16 @@
+# NOTICE
+
+This repository contains data source connectors written for
+[WeKnora](https://github.com/Tencent/WeKnora).
+
+WeKnora is Copyright (c) 2026 Tencent and is distributed under the MIT License.
+These connectors were originally developed in a WeKnora customization branch
+and depend on WeKnora's connector interface at integration time. They are not
+an official WeKnora project and are not endorsed by Tencent.
+
+The connector implementations in this repository are distributed under the MIT
+License; see [LICENSE](LICENSE). The sanitization performed for this public
+release is documented in [docs/sanitization.md](docs/sanitization.md).
+
+Third-party names referenced in documentation (Subversion, Apache,
+VisualSVN, Seeyon/致远OA) belong to their respective owners.

@@ -1,0 +1,1651 @@
+diff --git a/frontend/src/api/datasource/index.ts b/frontend/src/api/datasource/index.ts
+index 19096307..f86ce0db 100644
+--- a/frontend/src/api/datasource/index.ts
++++ b/frontend/src/api/datasource/index.ts
+@@ -124,8 +124,22 @@ export function validateCredentials(type: string, credentials: Record<string, an
+ // listResources lists selectable resources for a data source. Pass parentId to
+ // lazily load the direct children of a resource (e.g. expanding a Feishu wiki
+ // space/node), which avoids traversing the whole tree up front.
+-export function listResources(id: string, parentId?: string) {
+-  const query = parentId ? `?parent_id=${encodeURIComponent(parentId)}` : ''
++// Resource listing has three modes, and the picker uses all three:
++//   parentId            → that resource's children (e.g. a report's fields)
++//   { keyword }         → name search (large listings filter server-side)
++//   neither             → the whole top-level listing
++// `name` accompanies parentId so a connector with an expensive listing can find
++// that one resource by name instead of listing everything to resolve its id.
++export function listResources(
++  id: string,
++  parentId?: string,
++  options?: { keyword?: string; name?: string },
++) {
++  const params = new URLSearchParams()
++  if (parentId) params.set('parent_id', parentId)
++  if (options?.keyword) params.set('keyword', options.keyword)
++  if (options?.name) params.set('name', options.name)
++  const query = params.toString() ? `?${params.toString()}` : ''
+   return get(`/api/v1/datasource/${id}/resources${query}`, { timeout: 120000 })
+ }
+ 
+diff --git a/frontend/src/i18n/locales/en-US.ts b/frontend/src/i18n/locales/en-US.ts
+index e4a49b22..52e81a06 100755
+--- a/frontend/src/i18n/locales/en-US.ts
++++ b/frontend/src/i18n/locales/en-US.ts
+@@ -7081,6 +7081,48 @@ export default {
+       singleLibraryOnly: 'A data source syncs one library; clear the current library before selecting another.',
+       selectionRequired: 'Select at least one library, folder or file',
+     },
++    seeyon: {
++      baseUrl: 'MCP gateway URL', accessToken: 'MCP personal authorization code',
++      baseUrlHint: "Required: the MCP gateway endpoint printed by your Seeyon V5 deployment's mcpServers configuration (for example https://<gateway-host>/mcp-gateway/<application-id>/apps/seeyon/message). A gateway on a private network must also be added to the deployment's SSRF_WHITELIST_EXTRA allow-list.",
++      accessTokenHint: 'Copy the MCP personal authorization code from Seeyon V5 under "Personal settings → Task token" (it looks like xxxx.userId). It is valid for 30 days by default, does not refresh automatically, and must be obtained again once it expires.',
++      settingsLabel: 'Sync settings',
++      maxDocumentBytes: 'Max document size (bytes)',
++      maxDocumentBytesHint: 'Defaults to 1048576 bytes (1 MiB). A report is split into as many documents as this ceiling requires, and each document becomes one knowledge item: raise it to produce fewer, larger documents, or lower it to make each one easier to retrieve.',
++      maxRows: 'Max rows per report',
++      maxRowsHint: 'Defaults to 50000 rows; 0 means unlimited. When the cap is reached the sync stops paging and the report overview document says the data was truncated, so nothing is dropped silently.',
++      granularity: 'Document granularity',
++      granularityHint: 'part splits the byte stream into documents that each span many rows, so there are fewer of them; row makes every row its own document so a single record can be cited exactly, but a report with more than 50000 rows is rejected, so add filters to narrow it down to a few thousand rows first.',
++      granularityPart: 'Split by bytes',
++      granularityRow: 'One row per document',
++      probeIncremental: 'Change probe',
++      probeIncrementalHint: 'Every sync first sends two single-row requests to decide whether the data changed; when nothing changed the whole pass is skipped instead of reading everything again.',
++      fullResyncHours: 'Full resync interval (hours)',
++      fullResyncHoursHint: 'How many hours may pass before a full rebuild is forced, as a fallback for sources that do not maintain a modified timestamp.',
++      timestampTimezone: 'Timestamp timezone',
++      timestampTimezoneHint: 'The timezone the report modified timestamps are expressed in (default Asia/Shanghai). If the sync host and the OA server are in different timezones you must change this, or the change probe computes the wrong time window.',
++      selectionRequired: 'Select at least one report',
++      fieldsStepTitle: 'Fields to sync from this report',
++      selectFields: 'Fields to sync',
++      selectFieldsHint: 'Everything is selected by default. While the selection is untouched the connector syncs every field of the report; once you deselect any, only the checked fields are synced.',
++      fieldRequired: 'Select at least one field to sync',
++      searchFields: 'Search field names',
++      selectAll: 'Select all',
++      clearAll: 'Clear all',
++      filterSectionTitle: 'Fixed filter conditions (optional)',
++      filterSectionHint: 'Leave this empty to sync the whole report. Conditions are combined with AND and only take effect once the field, operator and value are all filled in. On a very large report, rows beyond the per-report row cap are not synced.',
++      addCondition: 'Add condition',
++      removeCondition: 'Remove condition',
++      selectFilterField: 'Select a filter field',
++      selectOperator: 'Select an operator',
++      conditionValue: 'Value',
++      singleReportOnly: 'A data source syncs exactly one report. Clear the current selection before choosing a different one.',
++      fieldLoadFailed: 'Failed to load the report fields',
++      fieldCount: '{n} fields selected',
++      searchReports: 'Search report names',
++      selectedReport: 'Selected report: {name}',
++      searchHint: 'Type a report name or keyword to search (the full list is never downloaded)',
++      searchEmpty: 'No matching report — try another keyword',
++    },
+     resourceHint: 'Select the spaces or folders to sync',
+     untitled: 'Untitled',
+     resourceLoadFailed: 'Failed to load resources',
+@@ -7115,6 +7157,7 @@ export default {
+       selectType: 'Select Type',
+       credentials: 'Credentials',
+       resources: 'Resources',
++      fields: 'Fields',
+       strategy: 'Strategy'
+     },
+     syncHistory: 'Sync History',
+@@ -7158,7 +7201,8 @@ export default {
+       ima: 'Tencent IMA',
+       gitlab: 'GitLab',
+       svn: 'SVN (Subversion)',
+-      seafile: 'Seafile'
++      seafile: 'Seafile',
++      seeyon: 'Seeyon OA - Query/Statistics'
+     },
+     connectorDesc: {
+       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
+@@ -7173,7 +7217,8 @@ export default {
+       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
+       gitlab: 'Sync files from GitLab projects',
+       svn: 'Sync files from an SVN repository over http(s) WebDAV',
+-      seafile: 'Sync folders and files from Seafile libraries'
++      seafile: 'Sync folders and files from Seafile libraries',
++      seeyon: 'Sync data from Seeyon V5 CAP4 query and single-table statistics reports, choosing which fields to sync and setting optional fixed filters',
+     },
+     drive: {
+       folderTokenLabel: 'Drive folder token',
+diff --git a/frontend/src/i18n/locales/ja-JP.ts b/frontend/src/i18n/locales/ja-JP.ts
+index 7c9aee75..d9737b3c 100644
+--- a/frontend/src/i18n/locales/ja-JP.ts
++++ b/frontend/src/i18n/locales/ja-JP.ts
+@@ -7081,6 +7081,48 @@ export default {
+       singleLibraryOnly: '1つのデータソースは1つのライブラリのみ同期できます。別のライブラリを選ぶ前に現在の選択を解除してください。',
+       selectionRequired: 'ライブラリ、フォルダまたはファイルを1つ以上選択してください',
+     },
++    seeyon: {
++      baseUrl: 'MCP ゲートウェイ URL', accessToken: 'MCP 個人認証コード',
++      baseUrlHint: '必須: ご利用の Seeyon V5 環境の mcpServers 設定に記載された MCP ゲートウェイ URL（例: https://<gateway-host>/mcp-gateway/<application-id>/apps/seeyon/message）。ゲートウェイが社内ネットワークにある場合は、そのホストをデプロイの SSRF_WHITELIST_EXTRA 許可リストに追加する必要があります。',
++      accessTokenHint: 'Seeyon V5 の「個人設定 → タスクトークン」で MCP 個人認証コード（xxxx.ユーザーID の形式）を取得します。既定で 30 日間有効で自動更新はされないため、期限切れ後は再取得してください。',
++      settingsLabel: '同期設定',
++      maxDocumentBytes: '1 ドキュメントの最大サイズ（バイト）',
++      maxDocumentBytesHint: '既定は 1048576 バイト（1 MiB）です。レポートはこの上限に収まるよう複数のドキュメントに分割され、1 ドキュメントが 1 つのナレッジ項目になります。大きくすると分割数が減り、小さくすると 1 件ずつが検索で見つかりやすくなります。',
++      maxRows: 'レポートあたりの最大行数',
++      maxRowsHint: '既定は 50000 行、0 は無制限です。上限に達するとページ送りを停止し、レポート概要ドキュメントにデータが切り捨てられた旨を明記します。データが黙って失われることはありません。',
++      granularity: 'ドキュメント粒度',
++      granularityHint: 'part = バイト単位で分割（1 ドキュメントに複数行が入るためドキュメント数は少なくなります）。row = 1 行 1 ドキュメント（1 件のレコードを正確に引用できますが、行数が 50000 を超えると拒否されるため、先に絞り込み条件で数千件程度まで範囲を狭めるのが適しています）。',
++      granularityPart: 'バイト単位で分割',
++      granularityRow: '1 行 1 ドキュメント',
++      probeIncremental: '変更検出',
++      probeIncrementalHint: '同期のたびに 1 行だけ取得する 2 つのリクエストでデータが変化したかを判定します。変化がなければその回は全体を読み直さずにスキップします。',
++      fullResyncHours: '強制フル同期の周期（時間）',
++      fullResyncHoursHint: '最大で何時間ごとに完全な再構築を強制するか。更新日時を管理していないソースのための保険です。',
++      timestampTimezone: 'タイムスタンプのタイムゾーン',
++      timestampTimezoneHint: 'レポートの更新日時が属するタイムゾーン（既定は Asia/Shanghai）。同期ホストと OA サーバーのタイムゾーンが異なる場合は必ず変更してください。変更しないと変更検出の時間枠がずれます。',
++      selectionRequired: 'レポートを1つ以上選択してください',
++      fieldsStepTitle: 'このレポートで同期する項目',
++      selectFields: '同期する項目を選択',
++      selectFieldsHint: '既定ではすべて選択されています。選択を変更しない限りレポートの全項目が同期され、チェックを外すと選択した項目だけが同期されます。',
++      fieldRequired: '同期する項目を1つ以上選択してください',
++      searchFields: '項目名で検索',
++      selectAll: 'すべて選択',
++      clearAll: 'すべて解除',
++      filterSectionTitle: '固定の絞り込み条件（任意）',
++      filterSectionHint: '未入力の場合はレポート全体を同期します。複数の条件は AND で結合され、項目・演算子・値がすべて揃った条件だけが有効になります。レポートが非常に大きい場合、レポートあたりの行数上限を超えた行は同期されません。',
++      addCondition: '条件を追加',
++      removeCondition: '条件を削除',
++      selectFilterField: '絞り込み項目を選択',
++      selectOperator: '演算子を選択',
++      conditionValue: '値',
++      singleReportOnly: '1つのデータソースで同期できるレポートは1つだけです。先に選択中のレポートを解除してから選び直してください。',
++      fieldLoadFailed: 'レポートの項目を読み込めませんでした',
++      fieldCount: '{n} 件の項目を選択中',
++      searchReports: 'レポート名で検索',
++      selectedReport: '選択中のレポート：{name}',
++      searchHint: 'レポート名またはキーワードで検索（全件は読み込みません）',
++      searchEmpty: '一致するレポートがありません。別のキーワードをお試しください',
++    },
+     resourceHint: '同期するスペースまたはフォルダを選択してください',
+     untitled: '無題',
+     resourceLoadFailed: 'リソースの読み込みに失敗しました',
+@@ -7115,6 +7157,7 @@ export default {
+       selectType: 'タイプを選択',
+       credentials: '認証情報',
+       resources: 'リソース',
++      fields: '項目を選択',
+       strategy: '同期戦略'
+     },
+     syncHistory: '同期履歴',
+@@ -7158,7 +7201,8 @@ export default {
+       ima: 'Tencent IMA',
+       gitlab: 'GitLab',
+       svn: 'SVN（Subversion）',
+-      seafile: 'Seafile'
++      seafile: 'Seafile',
++      seeyon: 'Seeyon OA（致远 OA）- 照会/統計'
+     },
+     connectorDesc: {
+       feishu: 'Feishu Wikiからドキュメント、スプレッドシート、ファイルを同期します',
+@@ -7173,7 +7217,8 @@ export default {
+       ima: 'Tencent IMAのナレッジベースからドキュメント、ノート、ファイルを同期します（AIセッションと動画の解析は非対応）',
+       gitlab: 'GitLabプロジェクトからファイルを同期します',
+       svn: 'http(s) WebDAV 経由で SVN リポジトリのファイルを同期します',
+-      seafile: 'Seafileライブラリのフォルダとファイルを同期します'
++      seafile: 'Seafileライブラリのフォルダとファイルを同期します',
++      seeyon: 'Seeyon V5 CAP4 の照会レポートと単表統計レポートのデータを同期します。同期する項目の選択と固定絞り込み条件の設定ができます',
+     },
+     drive: {
+       folderTokenLabel: 'Driveフォルダトークン',
+diff --git a/frontend/src/i18n/locales/ko-KR.ts b/frontend/src/i18n/locales/ko-KR.ts
+index 1ba18e9c..5a11a033 100755
+--- a/frontend/src/i18n/locales/ko-KR.ts
++++ b/frontend/src/i18n/locales/ko-KR.ts
+@@ -1028,6 +1028,48 @@ export default {
+       singleLibraryOnly: '데이터 소스 하나는 라이브러리 하나만 동기화합니다. 다른 라이브러리를 선택하기 전에 현재 선택을 해제하세요.',
+       selectionRequired: '라이브러리, 폴더 또는 파일을 하나 이상 선택하세요',
+     },
++    seeyon: {
++      baseUrl: 'MCP 게이트웨이 URL', accessToken: 'MCP 개인 인증 코드',
++      baseUrlHint: '필수: Seeyon V5 배포의 mcpServers 설정에 표시된 MCP 게이트웨이 주소(예: https://<gateway-host>/mcp-gateway/<application-id>/apps/seeyon/message). 게이트웨이가 사내망에 있다면 해당 호스트를 배포의 SSRF_WHITELIST_EXTRA 허용 목록에 추가해야 합니다.',
++      accessTokenHint: "Seeyon V5의 '개인 설정 → 작업 토큰'에서 MCP 개인 인증 코드(xxxx.사용자ID 형식)를 복사하세요. 기본 유효 기간은 30일이며 자동 갱신되지 않으므로 만료 후 다시 발급받아야 합니다.",
++      settingsLabel: '동기화 설정',
++      maxDocumentBytes: '문서당 최대 크기(바이트)',
++      maxDocumentBytesHint: '기본값은 1048576바이트(1 MiB)입니다. 보고서는 이 상한에 맞춰 여러 문서로 분할되며 각 문서가 하나의 지식 항목이 됩니다. 값을 키우면 문서 수가 줄고, 줄이면 각 문서를 더 쉽게 검색할 수 있습니다.',
++      maxRows: '보고서당 최대 행 수',
++      maxRowsHint: '기본값은 50000행이며 0은 무제한입니다. 상한에 도달하면 페이징을 중단하고 보고서 개요 문서에 데이터가 잘렸음을 명시하므로 데이터가 조용히 사라지지 않습니다.',
++      granularity: '문서 단위',
++      granularityHint: 'part = 바이트 단위로 분할(문서 하나에 여러 행이 들어가 문서 수가 적음), row = 행 하나당 문서 하나(개별 레코드를 정확히 인용할 수 있지만 행 수가 50000을 넘으면 거부되므로 먼저 필터 조건으로 범위를 수천 건까지 좁히는 것이 좋습니다)',
++      granularityPart: '바이트 단위 분할',
++      granularityRow: '행 하나당 문서 하나',
++      probeIncremental: '변경 감지',
++      probeIncrementalHint: '동기화할 때마다 한 행만 가져오는 요청 두 개로 데이터가 변경되었는지 먼저 확인합니다. 변경이 없으면 해당 회차는 전체 읽기 없이 건너뜁니다.',
++      fullResyncHours: '강제 전체 동기화 주기(시간)',
++      fullResyncHoursHint: '최대 몇 시간마다 전체 재구성을 강제할지 지정합니다. 원본이 수정 시간을 관리하지 않는 경우를 위한 안전장치입니다.',
++      timestampTimezone: '타임스탬프 시간대',
++      timestampTimezoneHint: '보고서 수정 시간의 시간대입니다(기본값 Asia/Shanghai). 동기화 호스트와 OA 서버의 시간대가 다르면 반드시 이 항목을 변경해야 하며, 그렇지 않으면 변경 감지의 시간 범위가 잘못 계산됩니다.',
++      selectionRequired: '보고서를 하나 이상 선택하세요',
++      fieldsStepTitle: '이 보고서에서 동기화할 필드',
++      selectFields: '동기화할 필드 선택',
++      selectFieldsHint: '기본값은 전체 선택입니다. 선택을 변경하지 않으면 보고서의 모든 필드가 동기화되고, 선택을 해제하면 체크한 필드만 동기화됩니다.',
++      fieldRequired: '동기화할 필드를 하나 이상 선택하세요',
++      searchFields: '필드 이름 검색',
++      selectAll: '전체 선택',
++      clearAll: '전체 해제',
++      filterSectionTitle: '고정 필터 조건(선택)',
++      filterSectionHint: '비워 두면 보고서 전체를 동기화합니다. 여러 조건은 AND로 결합되며 필드, 연산자, 값이 모두 채워진 조건만 적용됩니다. 보고서가 매우 큰 경우 보고서당 최대 행 수를 초과한 행은 동기화되지 않습니다.',
++      addCondition: '조건 추가',
++      removeCondition: '조건 삭제',
++      selectFilterField: '필터 필드 선택',
++      selectOperator: '연산자 선택',
++      conditionValue: '값',
++      singleReportOnly: '데이터 소스 하나는 보고서 하나만 동기화할 수 있습니다. 먼저 선택한 보고서를 해제한 뒤 다시 선택하세요.',
++      fieldLoadFailed: '보고서 필드를 불러오지 못했습니다',
++      fieldCount: '필드 {n}개 선택됨',
++      searchReports: '보고서 이름 검색',
++      selectedReport: '선택한 보고서: {name}',
++      searchHint: '보고서 이름이나 키워드로 검색하세요(전체 목록은 불러오지 않습니다)',
++      searchEmpty: '일치하는 보고서가 없습니다. 다른 키워드로 시도해 주세요',
++    },
+     resourceHint: '동기화할 공간/폴더를 선택하세요',
+     untitled: '제목 없음',
+     resourceLoadFailed: '리소스 목록 로드 실패',
+@@ -1191,7 +1233,8 @@ export default {
+       rss: 'RSS / Atom 피드에서 글 동기화',
+       gitlab: 'GitLab 프로젝트의 파일 동기화',
+       svn: 'http(s) WebDAV를 통해 SVN 저장소의 파일을 동기화합니다',
+-      seafile: 'Seafile 라이브러리의 폴더와 파일 동기화'
++      seafile: 'Seafile 라이브러리의 폴더와 파일 동기화',
++      seeyon: 'Seeyon V5 CAP4 조회 보고서와 단일 표 통계 보고서의 데이터를 동기화하며, 동기화할 필드를 선택하고 고정 필터 조건을 설정할 수 있습니다',
+     },
+     connector: {
+       feishu: '페이슈 (Feishu)',
+@@ -1206,7 +1249,8 @@ export default {
+       rss: 'RSS / Atom 피드',
+       gitlab: 'GitLab',
+       svn: 'SVN (Subversion)',
+-      seafile: 'Seafile'
++      seafile: 'Seafile',
++      seeyon: 'Seeyon OA(致远 OA) - 조회/통계'
+     },
+     logDetail: {
+       startTime: '시작 시간',
+@@ -1237,6 +1281,7 @@ export default {
+       selectType: '유형 선택',
+       credentials: '인증 정보',
+       resources: '리소스 선택',
++      fields: '필드 선택',
+       strategy: '동기화 전략'
+     },
+     conflict: {
+diff --git a/frontend/src/i18n/locales/ru-RU.ts b/frontend/src/i18n/locales/ru-RU.ts
+index 27e70d91..c43cc134 100755
+--- a/frontend/src/i18n/locales/ru-RU.ts
++++ b/frontend/src/i18n/locales/ru-RU.ts
+@@ -1028,6 +1028,48 @@ export default {
+       singleLibraryOnly: 'Один источник данных синхронизирует одну библиотеку. Снимите текущий выбор, прежде чем выбрать другую библиотеку.',
+       selectionRequired: 'Выберите хотя бы одну библиотеку, папку или файл',
+     },
++    seeyon: {
++      baseUrl: 'URL шлюза MCP', accessToken: 'Персональный код авторизации MCP',
++      baseUrlHint: 'Обязательно: адрес MCP-шлюза из конфигурации mcpServers вашего развёртывания Seeyon V5 (например https://<gateway-host>/mcp-gateway/<application-id>/apps/seeyon/message). Если шлюз находится в частной сети, его хост нужно добавить в список разрешённых SSRF_WHITELIST_EXTRA.',
++      accessTokenHint: 'Скопируйте персональный код авторизации MCP в Seeyon V5: «Личные настройки → Токен задачи» (вид xxxx.userId). По умолчанию он действует 30 дней и не обновляется автоматически, поэтому после истечения его нужно получить заново.',
++      settingsLabel: 'Настройки синхронизации',
++      maxDocumentBytes: 'Максимальный размер документа (байт)',
++      maxDocumentBytesHint: 'По умолчанию 1048576 байт (1 МиБ). Отчёт разбивается на столько документов, сколько требует этот предел, и каждый документ становится отдельной записью базы знаний: увеличьте значение, чтобы документов было меньше, или уменьшите, чтобы каждый из них было легче найти.',
++      maxRows: 'Максимум строк на отчёт',
++      maxRowsHint: 'По умолчанию 50000 строк; 0 — без ограничений. При достижении предела синхронизация прекращает постраничный обход и в документе-обзоре отчёта явно указывается, что данные усечены, поэтому ничего не теряется молча.',
++      granularity: 'Гранулярность документов',
++      granularityHint: 'part — разбиение по байтам (в одном документе несколько строк, документов меньше); row — одна строка на документ (можно точно ссылаться на отдельную запись, но при числе строк более 50000 запрос отклоняется, поэтому сначала сузьте диапазон фильтрами до нескольких тысяч строк).',
++      granularityPart: 'Разбиение по байтам',
++      granularityRow: 'Одна строка на документ',
++      probeIncremental: 'Обнаружение изменений',
++      probeIncrementalHint: 'Перед каждой синхронизацией два запроса, возвращающие по одной строке, определяют, изменились ли данные; если изменений нет, весь проход пропускается без полного чтения.',
++      fullResyncHours: 'Период принудительной полной синхронизации (часы)',
++      fullResyncHoursHint: 'Через сколько часов принудительно выполнять полную пересборку — страховка для источников, которые не ведут время изменения.',
++      timestampTimezone: 'Часовой пояс меток времени',
++      timestampTimezoneHint: 'Часовой пояс, в котором указано время изменения отчёта (по умолчанию Asia/Shanghai). Если хост синхронизации и сервер OA находятся в разных часовых поясах, этот параметр нужно изменить, иначе окно обнаружения изменений будет рассчитано неверно.',
++      selectionRequired: 'Выберите хотя бы один отчёт',
++      fieldsStepTitle: 'Поля этого отчёта для синхронизации',
++      selectFields: 'Поля для синхронизации',
++      selectFieldsHint: 'По умолчанию выбраны все поля. Пока выбор не изменён, синхронизируются все поля отчёта; после снятия отметок синхронизируются только выбранные поля.',
++      fieldRequired: 'Выберите хотя бы одно поле для синхронизации',
++      searchFields: 'Поиск по названию поля',
++      selectAll: 'Выбрать все',
++      clearAll: 'Снять все',
++      filterSectionTitle: 'Фиксированные условия фильтра (необязательно)',
++      filterSectionHint: 'Если оставить пустым, синхронизируется весь отчёт. Условия объединяются по И и действуют только при заполненных поле, операторе и значении. Для очень большого отчёта строки сверх лимита строк на отчёт не синхронизируются.',
++      addCondition: 'Добавить условие',
++      removeCondition: 'Удалить условие',
++      selectFilterField: 'Выберите поле фильтра',
++      selectOperator: 'Выберите оператор',
++      conditionValue: 'Значение',
++      singleReportOnly: 'Один источник данных синхронизирует ровно один отчёт. Сначала снимите текущий выбор, затем выберите другой отчёт.',
++      fieldLoadFailed: 'Не удалось загрузить поля отчёта',
++      fieldCount: 'Выбрано полей: {n}',
++      searchReports: 'Поиск по названию отчёта',
++      selectedReport: 'Выбранный отчёт: {name}',
++      searchHint: 'Введите название отчёта или ключевое слово для поиска (полный список не загружается)',
++      searchEmpty: 'Подходящих отчётов нет — попробуйте другое ключевое слово',
++    },
+     resourceHint: 'Выберите пространства или папки для синхронизации',
+     untitled: 'Без названия',
+     resourceLoadFailed: 'Не удалось загрузить список ресурсов',
+@@ -1191,7 +1233,8 @@ export default {
+       rss: 'Синхронизация статей из лент RSS / Atom',
+       gitlab: 'Синхронизация файлов из проектов GitLab',
+       svn: 'Синхронизация файлов из репозитория SVN по http(s) WebDAV',
+-      seafile: 'Синхронизация папок и файлов из библиотек Seafile'
++      seafile: 'Синхронизация папок и файлов из библиотек Seafile',
++      seeyon: 'Синхронизация данных отчётов-запросов и однотабличных статистических отчётов Seeyon V5 CAP4 с выбором синхронизируемых полей и необязательными фиксированными фильтрами',
+     },
+     connector: {
+       feishu: 'Feishu (Фэйшу)',
+@@ -1206,7 +1249,8 @@ export default {
+       rss: 'RSS / Atom лента',
+       gitlab: 'GitLab',
+       svn: 'SVN (Subversion)',
+-      seafile: 'Seafile'
++      seafile: 'Seafile',
++      seeyon: 'Seeyon OA (致远 OA) - запрос/статистика'
+     },
+     logDetail: {
+       startTime: 'Время начала',
+@@ -1237,6 +1281,7 @@ export default {
+       selectType: 'Выберите тип',
+       credentials: 'Учётные данные',
+       resources: 'Ресурсы',
++      fields: 'Выбор полей',
+       strategy: 'Стратегия'
+     },
+     conflict: {
+diff --git a/frontend/src/i18n/locales/zh-CN.ts b/frontend/src/i18n/locales/zh-CN.ts
+index ee2fea3a..060b547b 100755
+--- a/frontend/src/i18n/locales/zh-CN.ts
++++ b/frontend/src/i18n/locales/zh-CN.ts
+@@ -1030,6 +1030,48 @@ export default {
+       singleLibraryOnly: '一个数据源只能同步一个资料库，请先取消已选资料库中的内容再改选。',
+       selectionRequired: '请至少勾选一个资料库、目录或文件',
+     },
++    seeyon: {
++      baseUrl: 'MCP 网关地址', accessToken: 'MCP 个人授权码',
++      baseUrlHint: '必填：填写致远 V5 部署给出的 MCP 网关地址（形如 https://<网关地址>/mcp-gateway/<应用ID>/apps/seeyon/message）。若网关在内网，还需要把域名加入部署的 SSRF_WHITELIST_EXTRA 白名单。',
++      accessTokenHint: '在致远 V5 的「个人设置 → 任务令牌」中获取 MCP 个人授权码（形如 xxxx.用户ID）。该授权码默认 30 天有效且不会自动续期，过期后需要重新获取。',
++      settingsLabel: '同步设置',
++      maxDocumentBytes: '单个文档大小上限（字节）',
++      maxDocumentBytesHint: '默认 1048576 字节（1 MiB）。一张报表会按这个上限拆分成多个文档，每篇文档相当于一个知识条目；调大可以少拆几篇，调小可以让单篇更容易被检索到。',
++      maxRows: '单张报表行数上限',
++      maxRowsHint: '默认 50000 行，0 表示不限制。达到上限时本次同步会停止翻页，并在报表概览文档里明确标注「数据已截断」，不会静默丢数据。',
++      granularity: '文档粒度',
++      granularityHint: 'part = 按字节分片（一篇文档含多行，文档数少）；row = 一行一篇（可精确引用单条记录，行数超过 50000 会被拒绝，适合先加筛选条件把范围缩到几千条）',
++      granularityPart: '按字节分片',
++      granularityRow: '一行一篇',
++      probeIncremental: '变更探测',
++      probeIncrementalHint: '每次同步先用两个只取一行的请求判断数据有没有变化；没有变化就整轮跳过，不再全量读取',
++      fullResyncHours: '强制全量周期（小时）',
++      fullResyncHoursHint: '最多多少小时强制做一次完整重建，兜底来源没有维护修改时间的情况',
++      timestampTimezone: '时间戳时区',
++      timestampTimezoneHint: '报表修改时间所属的时区（默认 Asia/Shanghai）。同步主机与 OA 服务器不同时区时必须改这一项，否则变更探测会算错时间窗',
++      selectionRequired: '请至少勾选一张报表',
++      fieldsStepTitle: '该报表的同步字段',
++      selectFields: '选择要同步的字段',
++      selectFieldsHint: '默认全选。未手动调整时，后端会同步该报表的全部字段；一旦取消勾选，就只有勾选的字段会被同步。',
++      fieldRequired: '请至少选择一个要同步的字段',
++      searchFields: '搜索字段名称',
++      selectAll: '全选',
++      clearAll: '全不选',
++      filterSectionTitle: '固定筛选条件（可选）',
++      filterSectionHint: '不填则同步整张报表；多条条件之间为“且”的关系，字段、运算符、值都填好后才会生效。报表数据量很大时，超出单张报表行数上限的部分不会同步。',
++      addCondition: '添加条件',
++      removeCondition: '删除条件',
++      selectFilterField: '选择筛选字段',
++      selectOperator: '选择运算符',
++      conditionValue: '筛选值',
++      singleReportOnly: '一个数据源只能同步一张报表，请先取消已选报表再改选',
++      fieldLoadFailed: '加载报表字段失败',
++      fieldCount: '已选 {n} 个字段',
++      searchReports: '搜索报表名称',
++      selectedReport: '当前已选报表：{name}',
++      searchHint: '输入报表名称或关键字搜索（不会一次性拉取全部报表）',
++      searchEmpty: '没有匹配的报表，换个关键字试试',
++    },
+     resourceHint: '选择要同步的内容空间/文件夹',
+     untitled: '无标题',
+     resourceLoadFailed: '加载资源列表失败',
+@@ -1193,7 +1235,8 @@ export default {
+       rss: '同步 RSS / Atom 订阅源中的文章',
+       gitlab: '同步 GitLab 项目中的文件',
+       svn: '同步 SVN 仓库中的文件（http/https WebDAV）',
+-      seafile: '同步 Seafile 资料库中的目录与文件'
++      seafile: '同步 Seafile 资料库中的目录与文件',
++      seeyon: '同步致远 V5 CAP4 查询报表与单表统计报表的数据，可选择要同步的字段并设置固定筛选条件',
+     },
+     connector: {
+       feishu: '飞书',
+@@ -1208,7 +1251,8 @@ export default {
+       rss: 'RSS / Atom 订阅',
+       gitlab: 'GitLab',
+       svn: 'SVN（Subversion）',
+-      seafile: 'Seafile'
++      seafile: 'Seafile',
++      seeyon: '致远OA-查询/统计'
+     },
+     logDetail: {
+       startTime: '开始时间',
+@@ -1239,6 +1283,7 @@ export default {
+       selectType: '选择类型',
+       credentials: '配置凭证',
+       resources: '选择范围',
++      fields: '选择字段',
+       strategy: '同步策略'
+     },
+     conflict: {
+diff --git a/frontend/src/i18n/locales/zh-TW.ts b/frontend/src/i18n/locales/zh-TW.ts
+index dc46fa40..a30e09b0 100644
+--- a/frontend/src/i18n/locales/zh-TW.ts
++++ b/frontend/src/i18n/locales/zh-TW.ts
+@@ -1012,6 +1012,48 @@ export default {
+       singleLibraryOnly: '一個資料源只能同步一個資料庫，請先取消已選資料庫中的內容再改選。',
+       selectionRequired: '請至少勾選一個資料庫、目錄或檔案',
+     },
++    seeyon: {
++      baseUrl: 'MCP 閘道位址', accessToken: 'MCP 個人授權碼',
++      baseUrlHint: '必填：填寫致遠 V5 部署提供的 MCP 閘道位址（形如 https://<閘道位址>/mcp-gateway/<應用ID>/apps/seeyon/message）。若閘道在內網，還需要把網域加入部署的 SSRF_WHITELIST_EXTRA 白名單。',
++      accessTokenHint: '在致遠 V5 的「個人設定 → 任務權杖」中取得 MCP 個人授權碼（形如 xxxx.使用者ID）。該授權碼預設 30 天有效且不會自動續期，過期後需要重新取得。',
++      settingsLabel: '同步設定',
++      maxDocumentBytes: '單一文件大小上限（位元組）',
++      maxDocumentBytesHint: '預設 1048576 位元組（1 MiB）。一張報表會依這個上限拆分成多份文件，每份文件相當於一個知識條目；調大可以少拆幾份，調小可以讓單份更容易被檢索到。',
++      maxRows: '單張報表列數上限',
++      maxRowsHint: '預設 50000 列，0 表示不限制。達到上限時本次同步會停止翻頁，並在報表概覽文件中明確標註「資料已截斷」，不會靜默丟失資料。',
++      granularity: '文件粒度',
++      granularityHint: 'part = 依位元組分片（一份文件包含多列，文件數少）；row = 一列一份（可精確引用單筆記錄，列數超過 50000 會被拒絕，適合先加篩選條件把範圍縮到幾千筆）',
++      granularityPart: '依位元組分片',
++      granularityRow: '一列一份',
++      probeIncremental: '變更偵測',
++      probeIncrementalHint: '每次同步先用兩個只取一列的請求判斷資料有沒有變化；沒有變化就整輪跳過，不再全量讀取',
++      fullResyncHours: '強制全量週期（小時）',
++      fullResyncHoursHint: '最多多少小時強制做一次完整重建，作為來源沒有維護修改時間的保底機制',
++      timestampTimezone: '時間戳時區',
++      timestampTimezoneHint: '報表修改時間所屬的時區（預設 Asia/Shanghai）。同步主機與 OA 伺服器不同時區時必須改這一項，否則變更偵測會算錯時間窗',
++      selectionRequired: '請至少勾選一張報表',
++      fieldsStepTitle: '該報表的同步欄位',
++      selectFields: '選擇要同步的欄位',
++      selectFieldsHint: '預設全選。未手動調整時，後端會同步該報表的全部欄位；一旦取消勾選，就只有勾選的欄位會被同步。',
++      fieldRequired: '請至少選擇一個要同步的欄位',
++      searchFields: '搜尋欄位名稱',
++      selectAll: '全選',
++      clearAll: '全不選',
++      filterSectionTitle: '固定篩選條件（選填）',
++      filterSectionHint: '不填則同步整張報表；多條條件之間為「且」的關係，欄位、運算子、值都填好後才會生效。報表資料量很大時，超出單張報表列數上限的部分不會同步。',
++      addCondition: '新增條件',
++      removeCondition: '刪除條件',
++      selectFilterField: '選擇篩選欄位',
++      selectOperator: '選擇運算子',
++      conditionValue: '篩選值',
++      singleReportOnly: '一個資料來源只能同步一張報表，請先取消已選報表再改選',
++      fieldLoadFailed: '載入報表欄位失敗',
++      fieldCount: '已選 {n} 個欄位',
++      searchReports: '搜尋報表名稱',
++      selectedReport: '目前選取的報表：{name}',
++      searchHint: '輸入報表名稱或關鍵字搜尋（不會一次拉取全部報表）',
++      searchEmpty: '沒有符合的報表，換個關鍵字試試',
++    },
+     resourceHint: '選擇要同步的內容空間/資料夾',
+     untitled: '無標題',
+     resourceLoadFailed: '載入資源清單失敗',
+@@ -1175,7 +1217,8 @@ export default {
+       rss: '同步 RSS / Atom 訂閱源中的文章',
+       gitlab: '同步 GitLab 專案中的檔案',
+       seafile: '同步 Seafile 資料庫中的目錄與檔案',
+-      svn: 'Sync files from an SVN repository over http(s) WebDAV'
++      svn: 'Sync files from an SVN repository over http(s) WebDAV',
++      seeyon: '同步致遠 V5 CAP4 查詢報表與單表統計報表的資料，可選擇要同步的欄位並設定固定篩選條件',
+     },
+     connector: {
+       feishu: '飛書',
+@@ -1190,7 +1233,8 @@ export default {
+       rss: 'RSS / Atom 訂閱',
+       gitlab: 'GitLab',
+       seafile: 'Seafile',
+-      svn: 'SVN (Subversion)'
++      svn: 'SVN (Subversion)',
++      seeyon: '致遠OA-查詢/統計'
+     },
+     logDetail: {
+       startTime: '開始時間',
+@@ -1221,6 +1265,7 @@ export default {
+       selectType: '選擇類型',
+       credentials: '設定憑證',
+       resources: '選擇範圍',
++      fields: '選擇欄位',
+       strategy: '同步策略'
+     },
+     conflict: {
+diff --git a/frontend/src/views/knowledge/settings/DataSourceEditorDialog.vue b/frontend/src/views/knowledge/settings/DataSourceEditorDialog.vue
+index 01f10580..ef3b81bd 100644
+--- a/frontend/src/views/knowledge/settings/DataSourceEditorDialog.vue
++++ b/frontend/src/views/knowledge/settings/DataSourceEditorDialog.vue
+@@ -272,6 +272,7 @@ const isSvnConnector = (type: string) => type === 'svn'
+ // Seafile resource IDs are "<repo_id>:<path>"; one data source syncs one
+ // library, so the picker refuses a selection that spans two libraries.
+ const isSeafileConnector = (type: string) => type === 'seafile'
++const isSeeyonConnector = (type: string) => type === 'seeyon'
+ const seafileLibraryOf = (id: string) => id.split(':')[0]
+ // Seafile IDs encode the hierarchy, so a saved selection whose node has
+ // vanished from the tree can still be recognised as living under `parent`.
+@@ -602,9 +603,26 @@ interface ConnectorDef {
+     hintKey?: string
+     multiline?: boolean
+     fieldType?: 'custom_headers'
++    // A setting lives in config.settings instead of the encrypted credentials,
++    // so a non-secret tuning knob (document size, row cap) is stored and shown
++    // like any other connector field without being encrypted or masked.
++    inSettings?: boolean
++    // kind selects the control an inSettings field renders as. Default 'number'.
++    kind?: 'number' | 'select' | 'switch' | 'text'
++    options?: { value: string; labelKey: string }[]
++    // Bounds for an inSettings numeric field; also the min/max the backend
++    // enforces, so the UI cannot produce a value the connector rejects.
++    min?: number
++    max?: number
++    step?: number
++    // defaultValue is what the backend applies when the setting is absent, and
++    // is displayed so an untouched field shows its effective value.
++    defaultValue?: number | string | boolean
+   }[]
+ }
+ 
++type ConnectorField = ConnectorDef['fields'][number]
++
+ const connectorDefs = computed<ConnectorDef[]>(() => [
+   {
+     type: 'feishu',
+@@ -791,13 +809,130 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
+       { key: 'api_token', labelKey: 'datasource.seafile.apiToken', placeholder: '', secret: true, hintKey: 'datasource.seafile.apiTokenHint' },
+     ],
+   },
++  {
++    // Seeyon V5 (致远 OA) CAP4 reports through the Seeyon MCP gateway. The
++    // credential is the per-user "MCP 个人授权码" that V5 prints into its
++    // copyable mcpServers JSON; it is user-scoped and expires, so the hint
++    // points at where to renew it. Only the knobs that operators actually tune
++    // are exposed: the per-document size ceiling that decides how one report is
++    // split, the per-report row cap, and the granularity, probe, full-resync and
++    // timestamp-timezone controls that steer incremental sync. design_types,
++    // page_size and tool_overrides keep their backend defaults and are
++    // documented in website-docs/03-features/10-datasource.md.
++    type: 'seeyon', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
++    fields: [
++      { key: 'base_url', labelKey: 'datasource.seeyon.baseUrl', placeholder: 'https://<gateway-host>/mcp-gateway/<application-id>/apps/seeyon/message', hintKey: 'datasource.seeyon.baseUrlHint' },
++      { key: 'access_token', labelKey: 'datasource.seeyon.accessToken', placeholder: '', secret: true, hintKey: 'datasource.seeyon.accessTokenHint' },
++      { key: 'max_document_bytes', labelKey: 'datasource.seeyon.maxDocumentBytes', placeholder: '', inSettings: true, optional: true, min: 65536, max: 16777216, step: 1024, defaultValue: 1048576, hintKey: 'datasource.seeyon.maxDocumentBytesHint' },
++      { key: 'max_rows', labelKey: 'datasource.seeyon.maxRows', placeholder: '', inSettings: true, optional: true, min: 0, max: 500000, step: 1000, defaultValue: 50000, hintKey: 'datasource.seeyon.maxRowsHint' },
++      // How one report becomes documents: 'part' cuts the byte stream into
++      // ~max_document_bytes chunks (few documents, each spanning many rows),
++      // 'row' makes every row its own document so a single record can be cited
++      // exactly — at the cost of one document per row.
++      { key: 'document_granularity', labelKey: 'datasource.seeyon.granularity', kind: 'select', options: [{ value: 'part', labelKey: 'datasource.seeyon.granularityPart' }, { value: 'row', labelKey: 'datasource.seeyon.granularityRow' }], defaultValue: 'part', inSettings: true, optional: true, placeholder: '', hintKey: 'datasource.seeyon.granularityHint' },
++      // Probe first: two one-row requests decide whether anything changed, and
++      // an unchanged report is skipped instead of being read end to end.
++      { key: 'probe_incremental', labelKey: 'datasource.seeyon.probeIncremental', kind: 'switch', defaultValue: true, inSettings: true, optional: true, placeholder: '', hintKey: 'datasource.seeyon.probeIncrementalHint' },
++      // Safety net for sources that never maintain a modified timestamp: rebuild
++      // from scratch at least this often.
++      { key: 'full_resync_hours', labelKey: 'datasource.seeyon.fullResyncHours', kind: 'number', min: 1, max: 720, step: 1, defaultValue: 24, inSettings: true, optional: true, placeholder: '', hintKey: 'datasource.seeyon.fullResyncHoursHint' },
++      // The timezone the report's modified timestamps are expressed in; a sync
++      // host in another timezone must override it or the probe window shifts.
++      { key: 'timestamp_timezone', labelKey: 'datasource.seeyon.timestampTimezone', kind: 'text', defaultValue: 'Asia/Shanghai', inSettings: true, optional: true, placeholder: 'Asia/Shanghai', hintKey: 'datasource.seeyon.timestampTimezoneHint' },
++    ],
++  },
+ ])
+ 
+ 
+ const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
+ 
++// --- Wizard steps ---
++// The step list is derived from the connector instead of being fixed: a Seeyon
++// data source syncs exactly one CAP4 report, and after picking that report the
++// user has to pick which of its fields to keep, so Seeyon gets one extra step
++// between "resources" and "strategy". Index-based branching (step === 2) would
++// therefore mean two different steps depending on the connector, so every
++// decision — rendered section, footer, confirm label, guards — is made on the
++// step KEY. `step` stays a plain index, which keeps step.value++/-- as the only
++// navigation mechanism and keeps 'credentials' at index 1 for the open/reset
++// assignments (step.value = isEdit ? 1 : 0, selectType's step.value = 1).
++type StepKey = 'type' | 'credentials' | 'resources' | 'fields' | 'strategy'
++
++const stepKeys = computed<StepKey[]>(() => {
++  const keys: StepKey[] = ['type', 'credentials', 'resources']
++  if (isSeeyonConnector(form.value.type)) keys.push('fields')
++  keys.push('strategy')
++  return keys
++})
++
++const stepKey = computed<StepKey>(() => stepKeys.value[step.value] ?? 'type')
++
++const STEP_TITLE_KEYS: Record<StepKey, string> = {
++  type: 'datasource.step.selectType',
++  credentials: 'datasource.step.credentials',
++  resources: 'datasource.step.resources',
++  fields: 'datasource.step.fields',
++  strategy: 'datasource.step.strategy',
++}
++
++const seeyonSettingFields = computed(
++  () => (currentDef.value?.fields || []).filter(field => field.inSettings),
++)
++
++// An inSettings field reads and writes config.settings instead of the encrypted
++// credentials. Reads fall back to the backend's own default so an untouched
++// field shows the value the connector will actually use, rather than a blank
++// box that silently means "whatever the server picked". The field's kind
++// decides how the stored value is coerced back into a control value: a value
++// that cannot be coerced at all also falls back to the default, so a settings
++// bag written by an older build never renders a broken control.
++function settingValue(field: ConnectorField): number | string | boolean | undefined {
++  const raw = form.value.config.settings?.[field.key]
++  if (raw === undefined || raw === null || raw === '') return field.defaultValue
++  if (field.kind === 'number') {
++    const parsed = typeof raw === 'number' ? raw : Number(String(raw).trim())
++    return Number.isFinite(parsed) ? parsed : field.defaultValue
++  }
++  if (field.kind === 'switch') {
++    if (typeof raw === 'boolean') return raw
++    const text = String(raw).trim().toLowerCase()
++    if (text === 'true') return true
++    if (text === 'false') return false
++    return field.defaultValue
++  }
++  return String(raw)
++}
++
++// t-input only models string | number, so a text field narrows the effective
++// value instead of widening the control's type.
++function settingTextValue(field: ConnectorField): string {
++  const value = settingValue(field)
++  return value === undefined || value === null ? '' : String(value)
++}
++
++function writeSettingValue(field: ConnectorField, value: unknown) {
++  const settings = { ...(form.value.config.settings || {}) }
++  const empty = value === undefined || value === null || value === ''
++    || (typeof value === 'number' && Number.isNaN(value))
++  if (empty) {
++    // Clearing the field re-inherits the backend default instead of writing a
++    // value the connector would reject.
++    delete settings[field.key]
++  } else if (field.kind === 'switch') {
++    // t-switch hands back a SwitchValue (boolean | string | number); storing the
++    // boolean keeps the settings bag consistent with the default.
++    settings[field.key] = Boolean(value)
++  } else {
++    // Booleans stay booleans, numbers stay numbers, strings stay strings.
++    settings[field.key] = value
++  }
++  form.value.config.settings = settings
++}
++
+ const displayedCredentialFields = computed(() => {
+-  const fields = currentDef.value?.fields || []
++  // inSettings fields are tuning knobs, not credentials: they are never
++  // encrypted, never masked, and never gated behind "replace credentials".
++  const fields = (currentDef.value?.fields || []).filter(field => !field.inSettings)
+   if (form.value.type !== "confluence") return fields
+ 
+   return fields.filter((field) => {
+@@ -807,6 +942,338 @@ const displayedCredentialFields = computed(() => {
+   })
+ })
+ 
++// --- Seeyon report fields (one report per data source) ---
++// A Seeyon data source syncs exactly ONE CAP4 report; after choosing it the user
++// picks which of its display fields to keep and optionally adds fixed filter
++// conditions. A tenant can expose well over a thousand reports and a single
++// report dozens of columns, so both pickers are filtered client-side.
++interface SeeyonConditionRow { fieldId: string; op: string; value: string }
++
++const seeyonReportSearch = ref('')
++// True once a search round-trip finished, so "no match" can be told apart from
++// "the user has not typed anything yet".
++const seeyonSearchPerformed = ref(false)
++let seeyonSearchTimer: ReturnType<typeof setTimeout> | null = null
++const seeyonFields = ref<Resource[]>([])
++// The report whose fields are in `seeyonFields`. Kept so walking back and forth
++// through the wizard does not re-list the same report.
++const seeyonFieldsReportId = ref('')
++const loadingSeeyonFields = ref(false)
++const seeyonFieldSearch = ref('')
++const seeyonSelectedFieldIds = ref<string[]>([])
++const seeyonConditions = ref<SeeyonConditionRow[]>([])
++
++const seeyonDisplayFields = computed(
++  () => seeyonFields.value.filter(field => field.type === 'display_field'),
++)
++const seeyonFilterFields = computed(
++  () => seeyonFields.value.filter(field => field.type === 'filter_field'),
++)
++
++// Top-level Seeyon resources are reports (flat leaves: the fields below a report
++// are not tree nodes). The rows always come from the server search, so no
++// client-side filtering is layered on top — a second filter over an already
++// filtered payload could only hide a match the gateway considers valid.
++const renderedResourceTree = computed(() => visibleTree.value)
++
++const filteredSeeyonDisplayFields = computed(() => {
++  const query = seeyonFieldSearch.value.trim().toLowerCase()
++  if (!query) return seeyonDisplayFields.value
++  return seeyonDisplayFields.value.filter(field =>
++    (field.name || field.external_id).toLowerCase().includes(query))
++})
++
++// Field external IDs are "<tableName>_<fieldName>", and the table name contains
++// underscores itself (formmain_1_0_field1205), so the split MUST be on the
++// LAST underscore: splitting on the first one would produce a bogus table name
++// and the condition would be rejected (or silently filter nothing).
++function splitSeeyonFieldId(id: string): { tableName: string; fieldName: string } {
++  const idx = id.lastIndexOf('_')
++  if (idx <= 0) return { tableName: '', fieldName: id }
++  return { tableName: id.slice(0, idx), fieldName: id.slice(idx + 1) }
++}
++
++function seeyonOperatorsFor(fieldId: string): string[] {
++  const field = seeyonFilterFields.value.find(f => f.external_id === fieldId)
++  const operators = field?.metadata?.operators
++  return Array.isArray(operators) ? operators.map(String) : []
++}
++
++// The report listing is ~1655 reports and one full listing costs the gateway
++// ~24s (it checks permissions report by report), so the picker never loads it:
++// the user types, and the backend answers with nameLike matches only.
++const seeyonSelectedReportName = computed(() => {
++  const id = selectedResourceIds.value[0] || ''
++  const known = resources.value.find(r => r.external_id === id)?.name
++  if (known) return known
++  return String(form.value.config.settings?.report_name || '')
++})
++
++// A search needs a saved row to call the API against, exactly like loadResources
++// did; in create mode the first search creates the paused temp row.
++async function ensureTempDataSourceForSearch(): Promise<string> {
++  if (tempDsId.value) {
++    if (!isEdit.value) {
++      await updateDataSource(tempDsId.value, {
++        ...form.value,
++        knowledge_base_id: props.kbId,
++      } as any)
++    }
++    return tempDsId.value
++  }
++  const res = await createDataSource({
++    ...form.value,
++    knowledge_base_id: props.kbId,
++    status: 'paused',
++  } as any)
++  const created = res?.data || res
++  tempDsId.value = created.id
++  return tempDsId.value
++}
++
++async function searchSeeyonReports() {
++  if (seeyonSearchTimer) {
++    clearTimeout(seeyonSearchTimer)
++    seeyonSearchTimer = null
++  }
++  const keyword = seeyonReportSearch.value.trim()
++  if (!keyword) {
++    resources.value = []
++    seeyonSearchPerformed.value = false
++    loadingResources.value = false
++    return
++  }
++  loadingResources.value = true
++  try {
++    const dsId = await ensureTempDataSourceForSearch()
++    const res = await listResources(dsId, undefined, { keyword })
++    resources.value = res?.data || res || []
++    seeyonSearchPerformed.value = true
++  } catch (e: any) {
++    resources.value = []
++    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
++  }
++  loadingResources.value = false
++}
++
++function scheduleSeeyonReportSearch() {
++  if (seeyonSearchTimer) clearTimeout(seeyonSearchTimer)
++  seeyonSearchTimer = setTimeout(() => {
++    seeyonSearchTimer = null
++    void searchSeeyonReports()
++  }, 300)
++}
++
++watch(seeyonReportSearch, () => {
++  seeyonSearchPerformed.value = false
++  scheduleSeeyonReportSearch()
++})
++
++// Entering the step must not fetch anything. When editing a source that already
++// has a report, its saved name seeds the search so the current pick is visible
++// and checked again.
++async function primeSeeyonReportSearch() {
++  resources.value = []
++  seeyonSearchPerformed.value = false
++  const saved = String(form.value.config.settings?.report_name || '').trim()
++  if (!saved) {
++    loadingResources.value = false
++    return
++  }
++  if (seeyonReportSearch.value.trim() !== saved) {
++    seeyonReportSearch.value = saved
++    return
++  }
++  await searchSeeyonReports()
++}
++
++async function loadSeeyonFields() {
++  const reportId = selectedResourceIds.value[0] || ''
++  if (!reportId) return
++  if (seeyonFieldsReportId.value === reportId && seeyonFields.value.length > 0) return
++  const dsId = tempDsId.value
++  if (!dsId) {
++    MessagePlugin.error(t('datasource.seeyon.fieldLoadFailed'))
++    return
++  }
++  loadingSeeyonFields.value = true
++  try {
++    // The name hint is what keeps this to one filtered listing (~1s) instead of
++    // a full index (~24s) plus a 1-row data probe (~37s).
++    const res = await listResources(dsId, reportId, { name: seeyonSelectedReportName.value })
++    seeyonFields.value = res?.data || res || []
++    seeyonFieldsReportId.value = reportId
++    applySavedSeeyonSelection()
++  } catch (e: any) {
++    seeyonFields.value = []
++    seeyonFieldsReportId.value = ''
++    MessagePlugin.error(e?.message || e?.error || t('datasource.seeyon.fieldLoadFailed'))
++  }
++  loadingSeeyonFields.value = false
++}
++
++// An empty/absent `fields` means "every field" server-side, so a source that
++// never pinned a selection opens with everything checked and its settings left
++// untouched — merely opening the editor must not narrow what it syncs. Ids the
++// report no longer has are dropped from the picker; they only disappear from the
++// saved value once the user actually changes the selection.
++function applySavedSeeyonSelection() {
++  const saved = form.value.config.settings?.fields
++  const savedIds = Array.isArray(saved) ? saved.map(String) : []
++  const available = new Set(seeyonDisplayFields.value.map(f => f.external_id))
++  seeyonSelectedFieldIds.value = savedIds.length > 0
++    ? savedIds.filter(id => available.has(id))
++    : [...available]
++
++  // Conditions are stored as tableName/fieldName; joining them back with the
++  // same last-underscore rule reproduces the field's external_id.
++  const savedConditions = form.value.config.settings?.conditions
++  seeyonConditions.value = Array.isArray(savedConditions)
++    ? savedConditions.map((condition: any) => {
++      const tableName = String(condition?.tableName || '')
++      const fieldName = String(condition?.fieldName || '')
++      return {
++        fieldId: tableName && fieldName ? `${tableName}_${fieldName}` : '',
++        op: String(condition?.op || ''),
++        value: String(condition?.value ?? ''),
++      }
++    })
++    : []
++}
++
++function writeSeeyonFieldsSetting() {
++  form.value.config.settings = {
++    ...(form.value.config.settings || {}),
++    // An empty array means "all fields" to the backend. The step refuses to be
++    // left with nothing checked, so this value is only ever transient.
++    fields: [...seeyonSelectedFieldIds.value],
++  }
++}
++
++function writeSeeyonConditionsSetting() {
++  const settings = { ...(form.value.config.settings || {}) }
++  // A half-filled row is not a filter: without a value the connector would
++  // compare against an empty string and silently sync nothing, so the row is
++  // dropped instead of being submitted.
++  const conditions = seeyonConditions.value
++    .filter(row => row.fieldId && row.op && row.value.trim() !== '')
++    .map((row) => {
++      const { tableName, fieldName } = splitSeeyonFieldId(row.fieldId)
++      return { tableName, fieldName, op: row.op, value: row.value }
++    })
++  if (conditions.length > 0) settings.conditions = conditions
++  else delete settings.conditions
++  form.value.config.settings = settings
++}
++
++function onSeeyonFieldSelectionChange(value: unknown) {
++  if (Array.isArray(value)) seeyonSelectedFieldIds.value = value.map(String)
++  writeSeeyonFieldsSetting()
++}
++
++// 全选/全不选 act on the rows the search box currently shows, so a filtered
++// "select all" means "all matches" rather than the whole report.
++function selectAllSeeyonFields() {
++  const selected = new Set(seeyonSelectedFieldIds.value)
++  for (const field of filteredSeeyonDisplayFields.value) selected.add(field.external_id)
++  seeyonSelectedFieldIds.value = [...selected]
++  writeSeeyonFieldsSetting()
++}
++
++function clearAllSeeyonFields() {
++  const visible = new Set(filteredSeeyonDisplayFields.value.map(f => f.external_id))
++  seeyonSelectedFieldIds.value = seeyonSelectedFieldIds.value.filter(id => !visible.has(id))
++  writeSeeyonFieldsSetting()
++}
++
++function addSeeyonCondition() {
++  const first = seeyonFilterFields.value[0]
++  seeyonConditions.value.push({
++    fieldId: first?.external_id || '',
++    op: first ? (seeyonOperatorsFor(first.external_id)[0] || '') : '',
++    value: '',
++  })
++}
++
++function removeSeeyonCondition(index: number) {
++  seeyonConditions.value.splice(index, 1)
++  writeSeeyonConditionsSetting()
++}
++
++// The three condition controls take the emitted value explicitly instead of
++// relying on the row already carrying it: which of `update:modelValue` and
++// `change` fires first is not something this dialog should depend on.
++function onSeeyonConditionFieldChange(row: SeeyonConditionRow, fieldId: unknown) {
++  if (typeof fieldId === 'string') row.fieldId = fieldId
++  // Operator names are per field, so switching the field invalidates the
++  // current operator instead of keeping one the connector does not accept.
++  const operators = seeyonOperatorsFor(row.fieldId)
++  if (!operators.includes(row.op)) row.op = operators[0] || ''
++  writeSeeyonConditionsSetting()
++}
++
++function onSeeyonConditionOpChange(row: SeeyonConditionRow, op: unknown) {
++  if (typeof op === 'string') row.op = op
++  writeSeeyonConditionsSetting()
++}
++
++function onSeeyonConditionValueChange(row: SeeyonConditionRow, value: unknown) {
++  if (typeof value === 'string') row.value = value
++  writeSeeyonConditionsSetting()
++}
++
++// The step cannot be left with zero columns: an empty `fields` array means
++// "all fields" server-side, so a stray zero-selection would silently sync every
++// column of a report that may hold hundreds of thousands of rows.
++function validateSeeyonFieldsStep(): boolean {
++  if (!isSeeyonConnector(form.value.type)) return true
++  if (seeyonSelectedFieldIds.value.length === 0) {
++    MessagePlugin.warning(t('datasource.seeyon.fieldRequired'))
++    return false
++  }
++  syncSeeyonSettings()
++  return true
++}
++
++// Persist what the step currently shows. Called when leaving the step so a
++// condition typed but not blurred into a change event is still submitted.
++function syncSeeyonSettings() {
++  writeSeeyonFieldsSetting()
++  writeSeeyonConditionsSetting()
++}
++
++// Columns and filters belong to the report that produced them, so switching
++// reports drops them instead of leaking them into the new report.
++function resetSeeyonFieldState() {
++  seeyonFields.value = []
++  seeyonFieldsReportId.value = ''
++  seeyonFieldSearch.value = ''
++  seeyonSelectedFieldIds.value = []
++  seeyonConditions.value = []
++  const settings = { ...(form.value.config.settings || {}) }
++  delete settings.fields
++  delete settings.conditions
++  form.value.config.settings = settings
++}
++
++// One report per data source, so the name is derived from it. Create mode only:
++// opening and saving an existing data source must never rename it.
++function applySeeyonReportSelection(previousReportId: string) {
++  const reportId = selectedResourceIds.value[0] || ''
++  if (reportId === previousReportId) return
++  resetSeeyonFieldState()
++  const report = resources.value.find(r => r.external_id === reportId)
++  // The name is saved next to the selection purely so the field step and the
++  // editor do not have to re-list ~1655 reports to learn it. It is a hint: the
++  // sync always addresses the report by resource_ids.
++  const settings = { ...(form.value.config.settings || {}) }
++  if (report?.name) settings.report_name = report.name
++  else delete settings.report_name
++  form.value.config.settings = settings
++  if (!reportId || isEdit.value) return
++  if (report?.name) form.value.name = `Seeyon-${report.name}`
++}
++
+ // --- Drawer lifecycle ---
+ watch(visible, async (v) => {
+   if (!v) {
+@@ -838,6 +1305,18 @@ watch(visible, async (v) => {
+   rssAuthHeaders.value = []
+   gitlabProjects.value = []
+   svnRepos.value = []
++  seeyonReportSearch.value = ''
++  seeyonSearchPerformed.value = false
++  if (seeyonSearchTimer) {
++    clearTimeout(seeyonSearchTimer)
++    seeyonSearchTimer = null
++  }
++  seeyonFields.value = []
++  seeyonFieldsReportId.value = ''
++  loadingSeeyonFields.value = false
++  seeyonFieldSearch.value = ''
++  seeyonSelectedFieldIds.value = []
++  seeyonConditions.value = []
+ 
+   if (isEdit.value && props.dataSource) {
+     // Reset edit/replace toggle every open so an aborted replace doesn't
+@@ -971,7 +1450,7 @@ async function testConnection() {
+   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
+     const fields = displayedCredentialFields.value
+     for (const f of fields) {
+-      if (f.optional || f.fieldType === 'custom_headers') continue
++      if (f.optional || f.fieldType === 'custom_headers' || f.inSettings) continue
+       if (!form.value.config.credentials[f.key]) {
+         MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
+         return
+@@ -1012,6 +1491,10 @@ async function testConnection() {
+ 
+ // --- Load resources ---
+ async function loadResources() {
++  if (isSeeyonConnector(form.value.type)) {
++    await primeSeeyonReportSearch()
++    return
++  }
+   loadingResources.value = true
+   try {
+     syncConfluencePublicFieldsToSettings()
+@@ -1146,6 +1629,7 @@ function uncheckResource(id: string, cover: Set<string>) {
+ function toggleResource(id: string) {
+   const cover = new Set(selectedResourceIds.value)
+   const seafile = isSeafileConnector(form.value.type)
++  const seeyon = isSeeyonConnector(form.value.type)
+   if ((checkStates.value.get(id) || 'unchecked') === 'unchecked') {
+     checkResource(id, cover)
+   } else {
+@@ -1162,7 +1646,16 @@ function toggleResource(id: string) {
+     MessagePlugin.warning(t('datasource.seafile.singleLibraryOnly'))
+     return
+   }
++  // A Seeyon data source syncs exactly one report, so a second check is
++  // refused rather than silently replacing the first: the user clears the
++  // current pick first, which also discards the fields picked for it.
++  if (seeyon && cover.size > 1) {
++    MessagePlugin.warning(t('datasource.seeyon.singleReportOnly'))
++    return
++  }
++  const previousReportId = selectedResourceIds.value[0] || ''
+   selectedResourceIds.value = [...cover]
++  if (seeyon) applySeeyonReportSelection(previousReportId)
+ }
+ 
+ function validateRssFeedUrls(): boolean {
+@@ -1183,7 +1676,8 @@ function validateStep1Fields(): boolean {
+ 
+   const fields = displayedCredentialFields.value
+   for (const f of fields) {
+-    if (f.optional || f.fieldType === 'custom_headers') continue
++    // inSettings fields are tuning knobs in config.settings, not credentials.
++    if (f.optional || f.fieldType === 'custom_headers' || f.inSettings) continue
+     if (!form.value.config.credentials[f.key]) {
+       MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
+       return false
+@@ -1193,14 +1687,14 @@ function validateStep1Fields(): boolean {
+ }
+ 
+ async function nextStep() {
+-  if (step.value === 1) {
++  if (stepKey.value === 'credentials') {
+     if (!validateStep1Fields()) return
+     if (needsConnectionTest() && testResult.value !== 'success') {
+       await testConnection()
+       if ((testResult.value as string) !== 'success') return
+     }
+   }
+-  if (step.value === 2 && isDriveConnector(form.value.type)) {
++  if (stepKey.value === 'resources' && isDriveConnector(form.value.type)) {
+     // folder_token 是 Drive 连接器的必填项：为空就地标错并留在本步,
+     // 不允许带着空 token 进入同步策略。
+     if (!driveFolderToken.value.trim()) {
+@@ -1209,14 +1703,14 @@ async function nextStep() {
+     }
+     driveFolderTokenError.value = ''
+   }
+-  if (step.value === 2 && isGitLabConnector(form.value.type)) {
++  if (stepKey.value === 'resources' && isGitLabConnector(form.value.type)) {
+     syncGitLabProjectsToSettings()
+     if (!gitlabProjects.value.some(project => project.project_id.trim())) {
+       MessagePlugin.warning(t('datasource.gitlab.projectRequired'))
+       return
+     }
+   }
+-  if (step.value === 2 && isSvnConnector(form.value.type)) {
++  if (stepKey.value === 'resources' && isSvnConnector(form.value.type)) {
+     // The repository list is optional (an empty list syncs the credentials
+     // URL), but a half-filled row is not: it would be silently dropped.
+     const svnRows = svnRepos.value.filter(repo => repo.url.trim() || repo.pathsText.trim())
+@@ -1226,13 +1720,23 @@ async function nextStep() {
+     }
+     syncSvnReposToSettings()
+   }
+-  // Seafile has no "whole account" scope: the backend rejects an empty selection.
+-  if (step.value === 2 && isSeafileConnector(form.value.type) && selectedResourceIds.value.length === 0) {
+-    MessagePlugin.warning(t('datasource.seafile.selectionRequired'))
+-    return
++  // Seafile and Seeyon have no "whole account" scope, and the backend rejects
++  // an empty selection for both: a Seafile data source syncs exactly one
++  // library, and a single report can hold hundreds of thousands of rows, so
++  // "sync everything" is never a safe implicit default.
++  if (stepKey.value === 'resources' && selectedResourceIds.value.length === 0) {
++    if (isSeafileConnector(form.value.type)) {
++      MessagePlugin.warning(t('datasource.seafile.selectionRequired'))
++      return
++    }
++    if (isSeeyonConnector(form.value.type)) {
++      MessagePlugin.warning(t('datasource.seeyon.selectionRequired'))
++      return
++    }
+   }
++  if (stepKey.value === 'fields' && !validateSeeyonFieldsStep()) return
+   step.value++
+-  if (step.value === 2) {
++  if (stepKey.value === 'resources') {
+     // Drive connectors need a user-supplied folder_token before listing.
+     // In edit mode with a saved folder_token, auto-load so the saved tree
+     // (and any pre-existing selections) are revealed without an extra click.
+@@ -1246,6 +1750,12 @@ async function nextStep() {
+     if (isGitLabConnector(form.value.type)) return
+     if (isSvnConnector(form.value.type)) return
+     loadResources()
++    return
++  }
++  if (stepKey.value === 'fields') {
++    // The report is the parent of the field listing: the same accessor the lazy
++    // tree uses (tempDsId, i.e. the saved row in edit mode) plus the report id.
++    void loadSeeyonFields()
+   }
+ }
+ 
+@@ -1359,11 +1869,13 @@ function handleClose() {
+ }
+ 
+ async function handleDrawerConfirm() {
+-  if (step.value === 1 || step.value === 2) {
+-    await nextStep()
+-  } else if (step.value === 3) {
++  // The strategy step is always last, whatever the connector's step count is;
++  // everything before it advances one step.
++  if (stepKey.value === 'strategy') {
+     handleSubmit()
++    return
+   }
++  await nextStep()
+ }
+ 
+ const selectedResourceCount = computed(() => {
+@@ -1427,12 +1939,9 @@ function resourceRowState(id: string): CheckState {
+   return checkStates.value.get(id) || 'unchecked'
+ }
+ 
+-const stepTitles = computed(() => [
+-  t('datasource.step.selectType'),
+-  t('datasource.step.credentials'),
+-  t('datasource.step.resources'),
+-  t('datasource.step.strategy'),
+-])
++// Titles follow the connector-derived step list, so Seeyon shows five steps and
++// everything else keeps four.
++const stepTitles = computed(() => stepKeys.value.map(key => t(STEP_TITLE_KEYS[key])))
+ 
+ const drawerTitle = computed(() =>
+   isEdit.value ? t('datasource.editTitle') : t('datasource.createTitle'),
+@@ -1441,7 +1950,7 @@ const drawerTitle = computed(() =>
+ const drawerDescription = computed(() => stepTitles.value[step.value] ?? '')
+ 
+ const drawerConfirmText = computed(() => {
+-  if (step.value === 3) {
++  if (stepKey.value === 'strategy') {
+     return isEdit.value ? t('datasource.save') : t('datasource.createAndSync')
+   }
+   if (step.value >= 1) return t('datasource.next')
+@@ -1454,10 +1963,10 @@ const drawerConfirmText = computed(() => {
+     v-model:visible="visible"
+     :title="drawerTitle"
+     :description="drawerDescription"
+-    :class="[form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer', { 'ds-fixed-step': step === 2 && !isGitLabConnector(form.type) && !isSvnConnector(form.type) }]"
+-    :hide-footer="step === 0"
++    :class="[form.type ? `datasource-editor-drawer datasource-editor-drawer--${form.type}` : 'datasource-editor-drawer', { 'ds-fixed-step': stepKey === 'resources' && !isGitLabConnector(form.type) && !isSvnConnector(form.type) }]"
++    :hide-footer="stepKey === 'type'"
+     :confirm-text="drawerConfirmText"
+-    :confirm-loading="submitting || (step === 1 && testing)"
++    :confirm-loading="submitting || (stepKey === 'credentials' && testing)"
+     storage-key="setting-drawer:width:datasource-editor"
+     width="640px"
+     @confirm="handleDrawerConfirm"
+@@ -1471,7 +1980,7 @@ const drawerConfirmText = computed(() => {
+       >
+     </template>
+ 
+-    <template v-if="step === 1" #footer-left>
++    <template v-if="stepKey === 'credentials'" #footer-left>
+       <t-button v-if="!isEdit" variant="outline" @click="step = 0">
+         {{ t('datasource.back') }}
+       </t-button>
+@@ -1503,7 +2012,7 @@ const drawerConfirmText = computed(() => {
+       </span>
+     </template>
+ 
+-    <template v-else-if="step === 2 || step === 3" #footer-left>
++    <template v-else-if="stepKey === 'resources' || stepKey === 'fields' || stepKey === 'strategy'" #footer-left>
+       <t-button variant="outline" @click="prevStep">
+         {{ t('datasource.back') }}
+       </t-button>
+@@ -1524,8 +2033,8 @@ const drawerConfirmText = computed(() => {
+       </div>
+     </div>
+ 
+-    <!-- Step 0: Select connector type -->
+-    <section v-if="step === 0" class="setting-drawer__section">
++    <!-- Step: Select connector type -->
++    <section v-if="stepKey === 'type'" class="setting-drawer__section">
+       <h4 class="setting-drawer__section-title">{{ t('datasource.step.selectType') }}</h4>
+       <div class="ds-type-grid">
+         <button
+@@ -1546,8 +2055,8 @@ const drawerConfirmText = computed(() => {
+       </div>
+     </section>
+ 
+-    <!-- Step 1: Credentials -->
+-    <template v-if="step === 1">
++    <!-- Step: Credentials -->
++    <template v-if="stepKey === 'credentials'">
+       <div
+         v-if="currentDef && currentDef.requiredPermissions.length > 0"
+         class="ds-setup-guide ds-setup-guide--standalone"
+@@ -1793,10 +2302,57 @@ const drawerConfirmText = computed(() => {
+           </div>
+         </template>
+       </section>
++
++      <!-- Seeyon tuning knobs live outside the credentials section: they are
++           plain settings, so they stay editable while the stored token is
++           locked. Everything else (design_types, page_size, tool_overrides)
++           keeps its backend default; see website-docs/03-features/10-datasource.md. -->
++      <section v-if="isSeeyonConnector(form.type)" class="setting-drawer__section">
++        <h4 class="setting-drawer__section-title">{{ t('datasource.seeyon.settingsLabel') }}</h4>
++        <div v-for="field in seeyonSettingFields" :key="field.key" class="form-item">
++          <label class="form-label">{{ t(field.labelKey) }}</label>
++          <t-select
++            v-if="field.kind === 'select'"
++            :model-value="settingValue(field)"
++            :style="{ width: '200px' }"
++            @change="(value: unknown) => writeSettingValue(field, value)"
++          >
++            <t-option
++              v-for="option in field.options || []"
++              :key="option.value"
++              :value="option.value"
++              :label="t(option.labelKey)"
++            />
++          </t-select>
++          <t-switch
++            v-else-if="field.kind === 'switch'"
++            :value="settingValue(field) === true"
++            @change="(value: unknown) => writeSettingValue(field, value)"
++          />
++          <t-input
++            v-else-if="field.kind === 'text'"
++            :model-value="settingTextValue(field)"
++            :placeholder="field.placeholder"
++            :style="{ width: '200px' }"
++            @change="(value: unknown) => writeSettingValue(field, value)"
++          />
++          <t-input-number
++            v-else
++            :model-value="settingValue(field) as number | undefined"
++            :min="field.min"
++            :max="field.max"
++            :step="field.step"
++            theme="normal"
++            :style="{ width: '200px' }"
++            @update:model-value="(value: number | undefined) => writeSettingValue(field, value)"
++          />
++          <p v-if="field.hintKey" class="form-desc">{{ t(field.hintKey) }}</p>
++        </div>
++      </section>
+     </template>
+ 
+-    <!-- Step 2: Select resources -->
+-    <section v-if="step === 2" class="setting-drawer__section ds-resource-section">
++    <!-- Step: Select resources (for Seeyon: the single report to sync) -->
++    <section v-if="stepKey === 'resources'" class="setting-drawer__section ds-resource-section">
+       <template v-if="isGitLabConnector(form.type)">
+         <h4 class="setting-drawer__section-title">{{ t('datasource.gitlab.projects') }}</h4>
+         <p class="ds-resource-hint">{{ t('datasource.gitlab.projectsHint') }}</p>
+@@ -1837,6 +2393,28 @@ const drawerConfirmText = computed(() => {
+       <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
+       <p class="ds-resource-hint">{{ t('datasource.resourceHint') }}</p>
+ 
++      <!-- Seeyon can return ~1655 reports in one listing, so the picker is
++           filtered client-side by name. Reports are flat leaves: the field list
++           lives in the following step, not below this tree node. -->
++      <div v-if="isSeeyonConnector(form.type)" class="ds-report-search">
++        <t-input
++          v-model="seeyonReportSearch"
++          :placeholder="t('datasource.seeyon.searchReports')"
++          clearable
++        >
++          <template #prefix-icon><t-icon name="search" /></template>
++        </t-input>
++        <p v-if="selectedResourceIds.length" class="ds-resource-hint ds-report-search__selected">
++          {{ t('datasource.seeyon.selectedReport', { name: seeyonSelectedReportName || selectedResourceIds[0] }) }}
++        </p>
++        <p v-else-if="!seeyonReportSearch.trim()" class="ds-resource-hint">
++          {{ t('datasource.seeyon.searchHint') }}
++        </p>
++        <p v-else-if="seeyonSearchPerformed && resources.length === 0" class="ds-resource-hint">
++          {{ t('datasource.seeyon.searchEmpty') }}
++        </p>
++      </div>
++
+       <!-- Drive (云盘) root input: shown alongside the tree (not as a switch).
+            The user supplies a folder_token (or a Drive folder URL) and clicks
+            "load"; the tree below stays as a placeholder until load succeeds.
+@@ -1893,7 +2471,7 @@ const drawerConfirmText = computed(() => {
+         </div>
+         <div class="resource-picker__list" role="tree">
+           <template
+-            v-for="{ resource: r, depth, noticeAfter } in visibleTree"
++            v-for="{ resource: r, depth, noticeAfter } in renderedResourceTree"
+             :key="noticeAfter ? `${r.external_id}__notice` : r.external_id"
+           >
+           <div
+@@ -1960,6 +2538,10 @@ const drawerConfirmText = computed(() => {
+                 v-if="shouldShowResourceType(r.type)"
+                 class="resource-picker__type"
+               >{{ resourceTypeLabel(r.type) }}</span>
++              <span
++                v-if="r.type === 'report' && r.metadata?.design_type_name"
++                class="resource-picker__type"
++              >{{ r.metadata.design_type_name }}</span>
+             </span>
+           </div>
+           <p
+@@ -1972,7 +2554,10 @@ const drawerConfirmText = computed(() => {
+           </template>
+         </div>
+       </div>
+-      <div v-else class="ds-resource-empty">
++      <div
++        v-else-if="!isSeeyonConnector(form.type)"
++        class="ds-resource-empty"
++      >
+         <t-icon name="info-circle" size="32px" style="color: var(--td-warning-color); margin-bottom: 8px;" />
+         <p class="ds-empty-title">{{ t('datasource.noResources') }}</p>
+         <p class="ds-empty-desc">{{ t(`datasource.noResourcesDesc_${form.type}`, t('datasource.noResourcesDesc')) }}</p>
+@@ -2009,8 +2594,118 @@ const drawerConfirmText = computed(() => {
+       </template>
+     </section>
+ 
+-    <!-- Step 3: Sync strategy -->
+-    <template v-if="step === 3">
++    <!-- Step: Fields (Seeyon only) — which columns of the chosen report to sync,
++         plus optional fixed filter conditions. -->
++    <section v-if="stepKey === 'fields'" class="setting-drawer__section ds-fields-section">
++      <h4 class="setting-drawer__section-title">{{ t('datasource.seeyon.fieldsStepTitle') }}</h4>
++
++      <div v-if="loadingSeeyonFields" class="ds-loading-center"><t-loading /></div>
++      <template v-else>
++        <div class="ds-fields-header">
++          <label class="form-label">{{ t('datasource.seeyon.selectFields') }}</label>
++          <span class="ds-fields-count">
++            {{ t('datasource.seeyon.fieldCount', { n: seeyonSelectedFieldIds.length }) }}
++          </span>
++        </div>
++        <p class="ds-resource-hint">{{ t('datasource.seeyon.selectFieldsHint') }}</p>
++
++        <div class="ds-field-toolbar">
++          <t-input
++            v-model="seeyonFieldSearch"
++            class="ds-field-search"
++            :placeholder="t('datasource.seeyon.searchFields')"
++            clearable
++          >
++            <template #prefix-icon><t-icon name="search" /></template>
++          </t-input>
++          <button type="button" class="resource-picker__action" @click="selectAllSeeyonFields">
++            {{ t('datasource.seeyon.selectAll') }}
++          </button>
++          <span class="resource-picker__action-sep" aria-hidden="true">·</span>
++          <button type="button" class="resource-picker__action" @click="clearAllSeeyonFields">
++            {{ t('datasource.seeyon.clearAll') }}
++          </button>
++        </div>
++
++        <t-checkbox-group
++          v-model="seeyonSelectedFieldIds"
++          class="ds-field-list"
++          @change="onSeeyonFieldSelectionChange"
++        >
++          <t-checkbox
++            v-for="field in filteredSeeyonDisplayFields"
++            :key="field.external_id"
++            :value="field.external_id"
++            class="ds-field-row"
++          >
++            <span class="ds-field-name" :title="field.name || field.external_id">
++              {{ field.name || field.external_id }}
++            </span>
++          </t-checkbox>
++        </t-checkbox-group>
++
++        <h4 class="setting-drawer__section-title ds-fields-subtitle">
++          {{ t('datasource.seeyon.filterSectionTitle') }}
++        </h4>
++        <p class="ds-resource-hint">{{ t('datasource.seeyon.filterSectionHint') }}</p>
++
++        <div v-if="seeyonConditions.length > 0" class="ds-condition-list">
++          <div v-for="(row, index) in seeyonConditions" :key="index" class="ds-condition-row">
++            <t-select
++              v-model="row.fieldId"
++              class="ds-condition-field"
++              :placeholder="t('datasource.seeyon.selectFilterField')"
++              @change="(value: unknown) => onSeeyonConditionFieldChange(row, value)"
++            >
++              <t-option
++                v-for="field in seeyonFilterFields"
++                :key="field.external_id"
++                :value="field.external_id"
++                :label="field.name || field.external_id"
++              />
++            </t-select>
++            <t-select
++              v-model="row.op"
++              class="ds-condition-op"
++              :placeholder="t('datasource.seeyon.selectOperator')"
++              :disabled="!row.fieldId"
++              @change="(value: unknown) => onSeeyonConditionOpChange(row, value)"
++            >
++              <t-option
++                v-for="op in seeyonOperatorsFor(row.fieldId)"
++                :key="op"
++                :value="op"
++                :label="op"
++              />
++            </t-select>
++            <t-input
++              v-model="row.value"
++              class="ds-condition-value"
++              :placeholder="t('datasource.seeyon.conditionValue')"
++              @change="(value: unknown) => onSeeyonConditionValueChange(row, value)"
++            />
++            <t-button
++              variant="text"
++              shape="square"
++              size="small"
++              theme="danger"
++              class="ds-condition-remove"
++              :aria-label="t('datasource.seeyon.removeCondition')"
++              @click="removeSeeyonCondition(index)"
++            >
++              <t-icon name="close" />
++            </t-button>
++          </div>
++        </div>
++        <t-button variant="outline" size="small" class="ds-condition-add" @click="addSeeyonCondition">
++          <template #icon><t-icon name="add" /></template>
++          {{ t('datasource.seeyon.addCondition') }}
++        </t-button>
++      </template>
++    </section>
++
++    <!-- Step: Sync strategy -->
++    <template v-if="stepKey === 'strategy'">
+       <section class="setting-drawer__section">
+         <h4 class="setting-drawer__section-title">{{ t('datasource.syncScheduleLabel') }}</h4>
+         <t-select v-model="form.sync_schedule">
+@@ -3018,6 +3713,117 @@ const drawerConfirmText = computed(() => {
+   align-items: center;
+   justify-content: space-between;
+ }
++
++/* --- Fields step (Seeyon): ~1655 reports and up to 58 columns, both filtered --- */
++.ds-report-search {
++  margin-bottom: 8px;
++}
++
++.ds-fields-header {
++  display: flex;
++  align-items: baseline;
++  justify-content: space-between;
++  gap: 8px;
++
++  .form-label {
++    margin-bottom: 0;
++  }
++}
++
++.ds-fields-count {
++  flex-shrink: 0;
++  font-size: var(--app-text-sm);
++  color: var(--td-text-color-secondary);
++}
++
++.ds-field-toolbar {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++}
++
++.ds-field-search {
++  flex: 1;
++  min-width: 0;
++}
++
++.ds-field-list {
++  .ds-inset-panel();
++  display: grid;
++  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
++  gap: 2px 6px;
++  max-height: 260px;
++  overflow-y: auto;
++  padding: 6px;
++  overscroll-behavior: contain;
++}
++
++.ds-field-row {
++  min-width: 0;
++  padding: 2px 4px;
++  border-radius: var(--app-radius-xs);
++}
++
++.ds-field-row:hover {
++  background: color-mix(in srgb, var(--td-text-color-placeholder) 8%, transparent);
++}
++
++.ds-field-row :deep(.t-checkbox__label) {
++  min-width: 0;
++}
++
++.ds-field-name {
++  display: block;
++  font-size: var(--app-text-sm);
++  line-height: 1.5;
++  white-space: nowrap;
++  overflow: hidden;
++  text-overflow: ellipsis;
++}
++
++.ds-fields-subtitle {
++  margin-top: 10px;
++}
++
++.ds-condition-list {
++  display: flex;
++  flex-direction: column;
++  gap: 8px;
++}
++
++.ds-condition-row {
++  display: flex;
++  align-items: center;
++  gap: 6px;
++
++  .ds-condition-field {
++    flex: 1 1 42%;
++    min-width: 0;
++  }
++
++  .ds-condition-op {
++    flex: 0 0 26%;
++    min-width: 0;
++  }
++
++  .ds-condition-value {
++    flex: 1 1 32%;
++    min-width: 0;
++  }
++
++  .ds-condition-remove {
++    flex-shrink: 0;
++    color: var(--td-text-color-placeholder);
++
++    &:hover {
++      color: var(--td-error-color);
++    }
++  }
++}
++
++.ds-condition-add {
++  align-self: flex-start;
++}
+ </style>
+ 
+ <!--
+diff --git a/frontend/src/views/knowledge/settings/datasourceIcons.ts b/frontend/src/views/knowledge/settings/datasourceIcons.ts
+index 7f4e342d..df41b275 100644
+--- a/frontend/src/views/knowledge/settings/datasourceIcons.ts
++++ b/frontend/src/views/knowledge/settings/datasourceIcons.ts
+@@ -9,6 +9,7 @@ import confluenceIcon from '@/assets/img/datasource-confluence.svg'
+ import dingtalkIcon from '@/assets/img/im/dingtalk.svg'
+ import imaIcon from '@/assets/img/datasource-ima.png'
+ import seafileIcon from '@/assets/img/datasource-seafile.png'
++import seeyonIcon from '@/assets/img/datasource-seeyon.svg'
+ 
+ export const datasourceIconMap: Record<string, string> = {
+   feishu: feishuIcon,
+@@ -25,6 +26,7 @@ export const datasourceIconMap: Record<string, string> = {
+   svn: svnIcon,
+   ima: imaIcon,
+   seafile: seafileIcon,
++  seeyon: seeyonIcon,
+ }
+ 
+ export function getDatasourceIconUrl(type: string): string | undefined {

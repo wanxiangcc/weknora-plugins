@@ -1,0 +1,77 @@
+diff --git a/internal/datasource/connector.go b/internal/datasource/connector.go
+index 40482910..ee626cf0 100644
+--- a/internal/datasource/connector.go
++++ b/internal/datasource/connector.go
+@@ -6,6 +6,37 @@ import (
+ 	"github.com/Tencent/WeKnora/internal/types"
+ )
+ 
++// ResourceSearcher is an optional capability on top of Connector.
++//
++// A connector whose resource listing is too large to send in one payload (the
++// Seeyon gateway exposes ~1655 reports and a bare listing has already timed out
++// at 504) implements it so the picker can ask for matches only. The runtime
++// falls back to listing everything and filtering by name when a connector does
++// not implement it, so every connector keeps working unchanged.
++type ResourceSearcher interface {
++	// SearchResources returns only the resources whose name matches keyword.
++	// An empty keyword must return no resources rather than the full listing:
++	// the whole point is that the caller no longer asks for everything.
++	SearchResources(
++		ctx context.Context, config *types.DataSourceConfig, keyword string,
++	) ([]types.Resource, error)
++}
++
++// ResourceFieldsResolver is an optional capability on top of Connector.
++//
++// ListResources(parentID) can already list a resource's children, but it only
++// receives the id. A connector whose listing is expensive (Seeyon: ~24s for
++// every report) needs the resource's name too, so it can ask the upstream for
++// that one resource instead of listing everything to find it. The picker always
++// has the name, so it passes it here.
++type ResourceFieldsResolver interface {
++	// ResolveResourceFields lists the selectable children of one resource.
++	// nameHint may be empty; a connector must then fall back to a wider lookup.
++	ResolveResourceFields(
++		ctx context.Context, config *types.DataSourceConfig, resourceID, nameHint string,
++	) ([]types.Resource, error)
++}
++
+ // Connector is the interface that all external data source connectors must implement.
+ // Each connector (Feishu, Notion, Confluence, etc.) provides an implementation of this interface.
+ type Connector interface {
+@@ -329,6 +360,18 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
+ 		AuthType:     "password",
+ 		Capabilities: []string{"incremental", "deletion_sync", "hierarchical"},
+ 	},
++	// SEEYON addition: priority 15 for the same reason as SVN above — ties in
++	// ListAvailableConnectors' insertion sort over a map would make the picker
++	// order vary between runs.
++	types.ConnectorTypeSeeyon: {
++		Type: types.ConnectorTypeSeeyon,
++		Name: "致远OA-查询/统计",
++		Description: "Sync one CAP4 查询报表 or 单表统计 report per data source: " +
++			"choose the report, pick its fields, and optionally pin fixed filters",
++		Priority:     15,
++		AuthType:     "token",
++		Capabilities: []string{"incremental", "deletion_sync"},
++	},
+ }
+ 
+ // ListAvailableConnectors returns all available connector metadata
+diff --git a/internal/types/datasource.go b/internal/types/datasource.go
+index 9a911331..d3af85dc 100644
+--- a/internal/types/datasource.go
++++ b/internal/types/datasource.go
+@@ -43,6 +43,11 @@ const (
+ 	// svn+ssh:// are rejected at configuration time.
+ 	ConnectorTypeSVN     = "svn"
+ 	ConnectorTypeSeafile = "seafile"
++	// ConnectorTypeSeeyon syncs CAP4 report data (query and statistics reports)
++	// from a Seeyon V5 (致远 OA) deployment through its MCP gateway. The gateway
++	// is a stateless streamable-HTTP JSON-RPC endpoint authenticated with a
++	// per-user "MCP 个人授权码" carried in the Authorization header.
++	ConnectorTypeSeeyon = "seeyon"
+ 
+ 	// Sync modes
+ 	SyncModeIncremental = "incremental"

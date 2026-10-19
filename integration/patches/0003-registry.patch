@@ -1,0 +1,58 @@
+diff --git a/internal/container/container.go b/internal/container/container.go
+index a23c16c8..bb0c3adc 100644
+--- a/internal/container/container.go
++++ b/internal/container/container.go
+@@ -70,6 +70,7 @@ import (
+ 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
+ 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
+ 	seafileConnector "github.com/Tencent/WeKnora/internal/datasource/connector/seafile"
++	seeyonConnector "github.com/Tencent/WeKnora/internal/datasource/connector/seeyon"
+ 	svnConnector "github.com/Tencent/WeKnora/internal/datasource/connector/svn"
+ 	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
+ 	"github.com/Tencent/WeKnora/internal/event"
+@@ -1912,6 +1913,12 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
+ 	if err := registry.Register(seafileConnector.NewConnector()); err != nil {
+ 		errs = errors.Join(errs, fmt.Errorf("register seafile connector: %w", err))
+ 	}
++	// SEEYON addition: Seeyon V5 CAP4 reports (查询/统计) through the Seeyon MCP
++	// gateway. Stateless — every data source carries its own gateway URL and MCP
++	// personal authorization code in its encrypted credentials.
++	if err := registry.Register(seeyonConnector.NewConnector()); err != nil {
++		errs = errors.Join(errs, fmt.Errorf("register seeyon connector: %w", err))
++	}
+ 
+ 	// Future connectors will be registered here:
+ 	// if err := registry.Register(githubConnector.NewConnector()); err != nil { ... }
+diff --git a/internal/container/datasource_registry_test.go b/internal/container/datasource_registry_test.go
+index 5ecc6e04..5ff47d31 100644
+--- a/internal/container/datasource_registry_test.go
++++ b/internal/container/datasource_registry_test.go
+@@ -52,6 +52,28 @@ func TestConnectorRegistryIncludesSeafile(t *testing.T) {
+ 	}
+ }
+ 
++func TestConnectorRegistryIncludesSeeyon(t *testing.T) {
++	registry, err := initConnectorRegistry()
++	if err != nil {
++		t.Fatalf("initConnectorRegistry() error = %v", err)
++	}
++	connector, err := registry.Get(types.ConnectorTypeSeeyon)
++	if err != nil {
++		t.Fatalf("Seeyon connector is not registered: %v", err)
++	}
++	if connector.Type() != types.ConnectorTypeSeeyon {
++		t.Fatalf("connector.Type() = %q", connector.Type())
++	}
++	// Reports are fetched part by part and reconciled against the stored
++	// cursor, so both streaming interfaces are part of the contract.
++	if _, ok := connector.(datasource.StreamingConnector); !ok {
++		t.Fatal("Seeyon connector must implement datasource.StreamingConnector")
++	}
++	if _, ok := connector.(datasource.FullStreamingConnector); !ok {
++		t.Fatal("Seeyon connector must implement datasource.FullStreamingConnector")
++	}
++}
++
+ // Every registered connector must also be advertised in the metadata registry:
+ // the data source picker is built from that map, so a missing entry silently
+ // hides a working connector. The reverse direction is intentionally not
